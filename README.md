@@ -5,6 +5,7 @@
 <p align="center">
   <a href="https://github.com/rednote-hilab/dots.tts"><img src="https://img.shields.io/badge/GitHub-rednote--hilab%2Fdots.tts-blue?logo=github" alt="GitHub"></a>
   <a href="https://huggingface.co/collections/rednote-hilab/dotstts"><img src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-dots.tts%20collection-yellow" alt="Hugging Face"></a>
+  <a href="https://arxiv.org/abs/2606.07080"><img src="https://img.shields.io/badge/arXiv-Report-b31b1b?logo=arxiv&logoColor=white" alt="arXiv"></a>
   <a href="https://huggingface.co/spaces/rednote-hilab/dots.tts"><img src="https://img.shields.io/badge/Playground-Live-orange" alt="Playground"></a>
   <a href="https://rednote-hilab.github.io/dots.tts-demo/"><img src="https://img.shields.io/badge/Demo%20Page-Live-red" alt="Demo Page"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-green" alt="License"></a>
@@ -34,6 +35,7 @@ dots.tts achieves the best average performance on **Seed-TTS-Eval**, with WERs o
   - [MiniMax Multilingual](#minimax-multilingual-24-languages)
   - [CV3-Eval](#cv3-eval)
   - [EmergentTTS-Eval](#emergenttts-eval)
+- [Community Projects](#-community-projects)
 - [Risks and Limitations](#%EF%B8%8F-risks-and-limitations)
 - [Citation](#-citation)
 - [License](#-license)
@@ -89,7 +91,7 @@ dots.tts \
   --output clone.wav
 
 # Random-voice sampling (no reference) — only meaningful with a fine-tuned
-# single-speaker checkpoint; output is deterministic for a fixed --seed
+# single-speaker checkpoint
 dots.tts \
   --model-name-or-path /path/to/dots_tts_model \
   --text "Hello, this is a quick speech synthesis test." \
@@ -100,11 +102,11 @@ Common flags:
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--num-steps` | Flow-matching sampling steps | `10` |
-| `--guidance-scale` | CFG scale (flow-matching only; MeanFlow has CFG fused into the student) | `1.0` |
-| `--normalize-text` | Apply text normalization before inference | off |
+| `--num-steps` | Flow-matching sampling steps (higher = better quality, lower = faster) | `10` |
+| `--guidance-scale` | CFG scale (flow-matching only; MeanFlow has CFG fused into the student; values > 2 progressively amplify audio energy) | `1.0` |
+| `--normalize-text` | Apply text normalization before inference (via [WeTextProcessing](https://github.com/wenet-e2e/WeTextProcessing)) | off |
 | `--language` | Add an explicit language tag to the input text; accepts `none`, `auto_detect`, language codes such as `EN` / `ZH`, or names such as `english` / `chinese` | `none` |
-| `--seed` | RNG seed | `42` |
+| `--seed` | RNG seed (fixed seed → deterministic output) | `42` |
 
 `dots.tts --help` lists the full set.
 
@@ -123,6 +125,7 @@ import soundfile as sf
 runtime = DotsTtsRuntime.from_pretrained(
     "/path/to/dots_tts_model",
     precision="bfloat16",
+    optimize=True,  # torch.compile acceleration (warmup at load, faster steady-state)
 )
 
 result = runtime.generate(
@@ -293,6 +296,18 @@ Win-rate judged head-to-head against `gpt-4o-mini-tts` by Gemini-2.5-Pro-0506 ac
 
 ---
 
+## 🤝 Community Projects
+
+Third-party ports and integrations of dots.tts, maintained by the community.
+
+| Project | Description | Maintainer |
+|---|---|---|
+| [dots-tts-mlx](https://github.com/sb1992/dots-tts-mlx) | Pure-MLX inference port for Apple Silicon (Python) | [@sb1992](https://github.com/sb1992) |
+| [mlx-swift-dots-tts](https://github.com/sammcj/mlx-swift-dots-tts) | Native MLX Swift port for Apple Silicon (no Python runtime) | [@sammcj](https://github.com/sammcj) |
+| [Dots-TTS-ComfyUI](https://github.com/Saganaki22/Dots-TTS-ComfyUI) | ComfyUI custom nodes for TTS, voice cloning, and Whisper transcription | [@Saganaki22](https://github.com/Saganaki22) |
+
+---
+
 ## ⚠️ Risks and Limitations
 
 - **Misuse risk.** High-fidelity zero-shot voice cloning can produce highly realistic synthetic speech. The released checkpoints are intended for research and authorized deployment. Do **not** use dots.tts for impersonation, fraud, or disinformation. Combine downstream use with consent-aware reference-audio policies, robust synthetic-speech detection, and content watermarking. Clearly mark AI-generated audio.
@@ -307,10 +322,12 @@ If you find dots.tts useful, please consider citing the technical report and sta
 
 ```bibtex
 @article{dotstts2026,
-  title   = {dots.tts Technical Report},
-  author  = {dots.tts Team},
-  journal = {arXiv preprint},
-  year    = {2026},
+  title         = {dots.tts Technical Report},
+  author        = {dots.tts Team},
+  year          = {2026},
+  eprint        = {2606.07080},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.SD},
 }
 ```
 
@@ -322,5 +339,6 @@ dots.tts code and released checkpoints are licensed under [Apache-2.0](LICENSE).
 
 - [Qwen2.5](https://github.com/QwenLM/Qwen2.5) — LLM backbone initialization.
 - [DiTAR](https://arxiv.org/abs/2502.03930) and [ARDiT](https://arxiv.org/abs/2406.05551) — for the continuous-AR + per-patch diffusion design.
+- [HoliTok](https://github.com/bovod-sjtu/HoliTok) — for the AudioVAE design.
 - [BigVGAN](https://github.com/NVIDIA/BigVGAN) — for the vocoder design.
 - [CAM++](https://github.com/alibaba-damo-academy/3D-Speaker) — for speaker x-vector encoder.
