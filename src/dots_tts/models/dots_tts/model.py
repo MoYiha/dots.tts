@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import shutil
+from collections import OrderedDict
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -44,6 +46,12 @@ class _PromptConditioning:
     prompt_patches: torch.Tensor | None = None
     prompt_latents: torch.Tensor | None = None
     g_cond: torch.Tensor | None = None
+
+
+@dataclass
+class _PromptFeatureCacheEntry:
+    speaker_embedding: torch.Tensor | None = None
+    prompt_latent_distribution: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +120,7 @@ class DotsTtsModel(nn.Module):
         }
     )
     _optimize_enabled = True
+    _PROMPT_FEATURE_CACHE_MAX_ENTRIES = 256
     CONFIG_FILENAME = "config.json"
     HF_MODEL_TYPE = "dots_tts"
     HF_ARCHITECTURES = ["DotsTTSForConditionalGeneration"]
@@ -169,6 +178,9 @@ class DotsTtsModel(nn.Module):
         self._compiled_models: dict[
             tuple[str, tuple[Any, ...] | None], Callable[..., Any]
         ] = {}
+        self._prompt_feature_cache: OrderedDict[
+            str, _PromptFeatureCacheEntry
+        ] = OrderedDict()
         self._static_generate_workspaces: dict[tuple[Any, ...], dict[str, Any]] = {}
         self._fm_decode_workspaces: dict[tuple[Any, ...], dict[str, torch.Tensor]] = {}
 
@@ -891,6 +903,63 @@ class DotsTtsModel(nn.Module):
     # endregion Training loss assembly and forward
 
     # region Prompt conditioning and decode state helpers
+    def _prepare_prompt_audio_for_conditioning(
+        self,
+        prompt_audio: torch.Tensor,
+    ) -> tuple[torch.Tensor, str]:
+        if prompt_audio.ndim == 1:
+            prompt_audio = prompt_audio.unsqueeze(0)
+        prompt_audio = prompt_audio.detach().cpu().contiguous()
+
+        samples_per_patch = self.config.patch_size * self.hop_size
+        target_len = (
+            math.ceil(prompt_audio.size(1) / samples_per_patch) * samples_per_patch
+        )
+        pad_len = target_len - prompt_audio.size(1)
+        if pad_len > 0:
+            prompt_audio = F.pad(prompt_audio, (0, pad_len))
+
+        digest = hashlib.sha1()
+        digest.update(str(tuple(prompt_audio.shape)).encode("ascii"))
+        digest.update(str(prompt_audio.dtype).encode("ascii"))
+        digest.update(prompt_audio.numpy().tobytes())
+        return prompt_audio, digest.hexdigest()
+
+    def _get_prompt_feature_cache_entry(
+        self,
+        cache_key: str,
+    ) -> _PromptFeatureCacheEntry | None:
+        entry = self._prompt_feature_cache.get(cache_key)
+        if entry is not None:
+            self._prompt_feature_cache.move_to_end(cache_key)
+        return entry
+
+    def _store_prompt_feature_cache_entry(
+        self,
+        cache_key: str,
+        entry: _PromptFeatureCacheEntry,
+    ) -> None:
+        if (
+            entry.speaker_embedding is None
+            and entry.prompt_latent_distribution is None
+        ):
+            return
+        self._prompt_feature_cache[cache_key] = entry
+        self._prompt_feature_cache.move_to_end(cache_key)
+        while (
+            len(self._prompt_feature_cache) > self._PROMPT_FEATURE_CACHE_MAX_ENTRIES
+        ):
+            self._prompt_feature_cache.popitem(last=False)
+
+    def _can_cache_speaker_embedding(self, prompt_sample_count: int) -> bool:
+        max_audio_seconds = self.xvector_extractor.max_audio_seconds
+        if max_audio_seconds <= 0:
+            return True
+        max_input_length = round(
+            self.xvector_extractor.sample_rate * max_audio_seconds
+        )
+        return int(prompt_sample_count) <= max_input_length
+
     @torch.no_grad()
     def _prepare_prompt_conditioning(
         self,
@@ -906,41 +975,61 @@ class DotsTtsModel(nn.Module):
         self.vocoder.eval()
         self.xvector_extractor.eval()
         device = next(self.core.parameters()).device
-        if prompt_audio.ndim == 1:
-            prompt_audio = prompt_audio.unsqueeze(0)
+        prompt_audio, cache_key = self._prepare_prompt_audio_for_conditioning(
+            prompt_audio
+        )
+        prompt_sample_count = int(prompt_audio.shape[-1])
+        cache_entry = self._get_prompt_feature_cache_entry(cache_key)
+        if cache_entry is None:
+            cache_entry = _PromptFeatureCacheEntry()
         prompt_audio = prompt_audio.to(device=device)
 
-        target_len = math.ceil(
-            prompt_audio.size(1) / (self.config.patch_size * self.hop_size)
-        ) * (self.config.patch_size * self.hop_size)
-        pad_len = target_len - prompt_audio.size(1)
-        if pad_len > 0:
-            prompt_audio = F.pad(prompt_audio, (0, pad_len))
-
-        speaker_encoder = self._get_compiled_model(
-            "speaker_encoder",
-            self.xvector_extractor,
+        can_cache_speaker = self._can_cache_speaker_embedding(prompt_sample_count)
+        speaker_embedding = (
+            cache_entry.speaker_embedding if can_cache_speaker else None
         )
-        with measure_inference("speaker_encoder"):
-            speaker_embedding = (
-                speaker_encoder(prompt_audio[None, :]) * float(speaker_scale)
+        if speaker_embedding is None:
+            speaker_encoder = self._get_compiled_model(
+                "speaker_encoder",
+                self.xvector_extractor,
             )
-            g_cond = self.core.xvec_proj(speaker_embedding)
+            with measure_inference("speaker_encoder"):
+                speaker_embedding = speaker_encoder(prompt_audio[None, :])
+            if can_cache_speaker:
+                cache_entry.speaker_embedding = speaker_embedding.detach()
+        else:
+            logger.info(
+                "Prompt speaker cache hit: key={} prompt_samples={}",
+                cache_key[:12],
+                prompt_sample_count,
+            )
+        g_cond = self.core.xvec_proj(speaker_embedding * float(speaker_scale))
         if not use_prompt_prefill:
+            self._store_prompt_feature_cache_entry(cache_key, cache_entry)
             logger.info(
                 "Reference-audio-only conditioning prepared: prompt_samples={} speaker_scale={} device={}",
-                prompt_audio.shape[-1],
+                prompt_sample_count,
                 speaker_scale,
                 device,
             )
             return _PromptConditioning(g_cond=g_cond)
 
-        latent_encoder = self._get_compiled_model(
-            "latent_encoder",
-            self.vocoder.extract_latents,
-        )
-        with measure_inference("latent_encoder"):
-            prompt_latents = latent_encoder(prompt_audio[None, :])
+        prompt_latents = cache_entry.prompt_latent_distribution
+        if prompt_latents is None:
+            latent_encoder = self._get_compiled_model(
+                "latent_encoder",
+                self.vocoder.extract_latents,
+            )
+            with measure_inference("latent_encoder"):
+                prompt_latents = latent_encoder(prompt_audio[None, :])
+            cache_entry.prompt_latent_distribution = prompt_latents.detach()
+        else:
+            logger.info(
+                "Prompt latent cache hit: key={} prompt_samples={}",
+                cache_key[:12],
+                prompt_sample_count,
+            )
+        self._store_prompt_feature_cache_entry(cache_key, cache_entry)
         prompt_latents_sampled = self.core.io_helper.sample_from_latent(prompt_latents)
         prompt_latents_sampled = prompt_latents_sampled[:, : -self.config.patch_size]
         prompt_patches = rearrange(
@@ -951,7 +1040,7 @@ class DotsTtsModel(nn.Module):
         logger.info(
             "Prompt conditioning prepared: prompt_samples={} prompt_patch_count={} "
             "speaker_scale={} device={}",
-            prompt_audio.shape[-1],
+            prompt_sample_count,
             prompt_patches.size(1),
             speaker_scale,
             device,

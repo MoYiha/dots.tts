@@ -251,12 +251,7 @@ class DotsTtsRuntime:
         if not prompt_text:
             return ""
 
-        prompt_language = language
-        if prompt_language is None:
-            prompt_language = normalize_language_code(detect(prompt_text))
-
-        if prompt_language not in {"ZH", "YUE", "JA", "口音:粤语"}:
-            prompt_text += " "
+        prompt_text += "\n"
         if language is not None:
             prompt_text = attach_language_tag(prompt_text, language)
         return prompt_text
