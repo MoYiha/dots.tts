@@ -18,6 +18,7 @@
   <a href="https://arxiv.org/abs/2608.02673"><img src="https://img.shields.io/badge/Report-Edit-b31b1b?logo=arxiv&logoColor=white" alt="Edit Report"></a>
   <a href="https://dots-studio-dots-tts-edit.hf.space/"><img src="https://img.shields.io/badge/Playground-Edit-orange" alt="Edit Playground"></a>
   <a href="https://dots-studio-dots-tts-edit-demo.static.hf.space"><img src="https://img.shields.io/badge/Demo%20Page-Edit-red" alt="Edit Demo Page"></a>
+  <a href="https://github.com/studio-dots-ai/doteBench"><img src="https://img.shields.io/badge/Benchmark-Edit-blue?logo=github" alt="Edit Benchmark"></a>
 </p>
 
 **dots.tts** is a **2B-parameter fully continuous, end-to-end autoregressive (AR) text-to-speech system**. The backbone pairs a semantic encoder, an LLM, and an autoregressive flow-matching acoustic head over a **48 kHz** AudioVAE, with no discrete tokens anywhere in the pipeline.
@@ -25,6 +26,8 @@
 dots.tts achieves the best average performance on **Seed-TTS-Eval**, with WERs of **0.94% / 1.30% / 6.60%** and SIM scores of **81.0 / 77.1 / 79.5** on the zh / en / zh-hard test sets, respectively. It further attains the **highest average speaker similarity (83.9)** on the 24-language **MiniMax multilingual** benchmark. Across other benchmarks, dots.tts also consistently demonstrates **open-source state-of-the-art performance**, exhibiting strong generation stability, voice cloning ability, and emotional expressiveness.
 
 ### News
+
+* **[2026.09]** 🔥 Released **doteBench V1.0**, an XML-first bilingual benchmark for precise speech editing. Its 2,081 English and Chinese cases cover text, emotion, prosody, pause, and compositional edits, evaluating instruction following, local preservation, and audio quality. [Code](https://github.com/studio-dots-ai/doteBench) · [Release](https://github.com/studio-dots-ai/doteBench/releases/tag/v1.0.0) · [Paper](https://arxiv.org/abs/2608.02673).
 
 * **[2026.08]** 🔥 We have released **dots.tts.edit** for precise, instruction-controlled speech editing — download the [checkpoint](https://huggingface.co/dots-studio/dots.tts.edit), try the [Playground](https://dots-studio-dots-tts-edit.hf.space/), explore the [Demo Page](https://dots-studio-dots-tts-edit-demo.static.hf.space), and read the [paper](https://arxiv.org/abs/2608.02673).
 
